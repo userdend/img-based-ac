@@ -8,7 +8,7 @@ import sqlite3
 conn = sqlite3.connect("app.db")
 cursor  =conn.cursor()
 cursor.execute("CREATE TABLE IF NOT EXISTS preference (id INTEGER PRIMARY KEY, name TEXT)")
-cursor.execute("CREATE TABLE IF NOT EXISTS sequence_order (id INTEGER PRIMARY KEY, preference_id INTEGER, name TEXT, FOREIGN KEY (preference_id) REFERENCES preference(id))")
+cursor.execute("CREATE TABLE IF NOT EXISTS sequence_order (id INTEGER PRIMARY KEY, preference_id INTEGER, path TEXT, images TEXT, FOREIGN KEY (preference_id) REFERENCES preference(id))")
 conn.commit()
 
 # Create main window.
@@ -117,13 +117,6 @@ def show_preference_context_menu(event):
     context_menu.post(event.x_root, event.y_root)
     root.after(100, lambda: root.bind("<Button-1>", lambda e: context_menu.unpost()))
 
-def display_selected_preference(event):
-    selected_index = preference.curselection()
-
-    if selected_index:
-        index = preference.get(selected_index[0])
-        preference_selected_indicator.config(text = f"Selected Preference: {index}")
-
 # File menu.
 file_menu = tk.Menu(menu_bar, tearoff = 0)
 file_menu.add_command(label = "New Preference", command = add_preference)
@@ -182,11 +175,11 @@ frame.pack(pady = 20)
 preference_frame = tk.Frame(frame)
 preference_frame.pack(side = "left", padx = 10)
 
-preference_label = tk.Label(preference_frame, text = "Preferences", font = ("Aria", 10, "bold"))
+preference_label = tk.Label(preference_frame, text = "Preferences", font = ("Aria", 10, ""))
 preference_label.pack()
 
 preference_scrollbar = tk.Scrollbar(preference_frame, orient = "vertical")
-preference = tk.Listbox(preference_frame, height = 10, width = 20, yscrollcommand = preference_scrollbar.set, selectmode=tk.SINGLE, exportselection=False)
+preference = tk.Listbox(preference_frame, height = 10, width = 15, yscrollcommand = preference_scrollbar.set, selectmode=tk.SINGLE, exportselection=False)
 preference_scrollbar.config(command = preference.yview)
 
 preference.pack(side = "left")
@@ -198,17 +191,16 @@ context_menu.add_command(label = "Rename", command = rename_preference)
 context_menu.add_command(label = "Delete", command = delete_preference)
 
 preference.bind("<Button-3>", show_preference_context_menu)
-preference.bind("<<ListboxSelect>>", display_selected_preference)
 
 # Frame for sequence order.
 sequence_order_frame = tk.Frame(frame)
 sequence_order_frame.pack(side = "left", padx = 10)
 
-sequence_order_label = tk.Label(sequence_order_frame, text = "Sequence Order", font = ("Aria", 10, "bold"))
+sequence_order_label = tk.Label(sequence_order_frame, text = "Sequence Order", font = ("Aria", 10, ""))
 sequence_order_label.pack()
 
 sequence_order_scrollbar = tk.Scrollbar(sequence_order_frame, orient = "vertical")
-sequence_order = DragDropListBox(sequence_order_frame, height = 10, width = 20, yscrollcommand = sequence_order_scrollbar.set, selectmode=tk.SINGLE, exportselection=False)
+sequence_order = DragDropListBox(sequence_order_frame, height = 10, width = 25, yscrollcommand = sequence_order_scrollbar.set, selectmode=tk.SINGLE, exportselection=False)
 sequence_order_scrollbar.config(command = sequence_order.yview)
 
 sequence_order.pack(side = "left")
@@ -218,9 +210,10 @@ sequence_order_scrollbar.pack(side = "left", fill = "y")
 separator = ttk.Separator(root, orient = "horizontal")
 separator.pack(fill = "x")
 
-# Text widget to show selected preference.
-preference_selected_indicator = tk.Label(root, text = "Selected Preference: ")
-preference_selected_indicator.pack(pady = 5)
+# Get all the preference from db.
+cursor.execute("SELECT name FROM preference")
+for item in cursor.fetchall():
+    preference.insert(tk.END, item[0])
 
 # Root.
 root.mainloop()
