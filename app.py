@@ -135,7 +135,7 @@ class App:
         self.btn_start.grid(row = 5, column = 0, columnspan = 2, sticky = "nsew", pady = (0, 10))
 
         # Row 6.
-        self.info = ttk.Label(self.config_frame, text = "\u2139 Drag and drop to reorder items.\n\u2139Press ESC to stop the program.")
+        self.info = ttk.Label(self.config_frame, text = "\u2139 Drag and drop to reorder items.\n\u2139 Press ESC to stop the program.")
         self.info.grid(row = 6, column = 0, columnspan = 2)
 
     def validated_input_interval(self, user_input, new_value, widget_name):
