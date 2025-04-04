@@ -1,48 +1,33 @@
+# For building GUI.
 import tkinter as tk
-from tkinter import ttk, filedialog
-from PIL import Image, ImageTk
+from tkinter import ttk, filedialog, messagebox, simpledialog
+import sqlite3
+import json
 
-# Create main window.
-root = tk.Tk()
-root.title("Image-Based Auto Clicker")
-root.geometry("400x400")
-root.minsize(400, 400)
-root.maxsize(400, 400)
-root.resizable(False, False)
+# For auto-clicker to function.
+import time
+import pyautogui
+import cv2
+import numpy as np
+import threading
+import keyboard
 
-# Menu bar.
-menu_bar = tk.Menu(root)
-
-# File menu.
-file_menu = tk.Menu(menu_bar, tearoff = 0)
-file_menu.add_command(label = "New Preference", command = root.quit)
-file_menu.add_command(label = "Import Images", command = root.quit)
-file_menu.add_separator()
-file_menu.add_command(label = "Exit", command = root.quit)
-
-config_menu = tk.Menu(menu_bar, tearoff = 0)
-config_menu.add_command(label = "Run Preference", command = root.quit)
-
-menu_bar.add_cascade(label = "File", menu = file_menu)
-menu_bar.add_cascade(label = "Config", menu = config_menu)
-root.config(menu = menu_bar)
-
-# Allow Listbox to have reorder behaviour.
 class DragDropListBox(tk.Listbox):
-    def __init__(self, master, **kwargs):
+    def __init__(self, master, app, **kwargs):
         super().__init__(master, **kwargs)
-        
+        self.app = app
+
         self.bind("<ButtonPress-1>", self.on_press)
         self.bind("<B1-Motion>", self.on_motion)
         self.bind("<ButtonRelease-1>", self.on_release)
 
         self._drag_data = {"index": None}
-    
+
     def on_press(self, event):
         # Get item upon clicking.
         widget = event.widget
         self._drag_data["index"] = widget.nearest(event.y)
-    
+
     def on_motion(self, event):
         # Move item in the list while dragging.
         widget = event.widget
@@ -56,51 +41,262 @@ class DragDropListBox(tk.Listbox):
 
             # Update new index.
             self._drag_data["index"] = index
+            self.selection_clear(0, tk.END)
+            self.selection_set(index)
 
     def on_release(self, event):
         # Clear the drag data upon dropping.
         self._drag_data["index"] = None
+        self.app.import_or_reorder()
 
-# Parent frame.
-frame = tk.Frame(root)
-frame.pack(pady = 20)
+class App:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Image-Based Auto Clicker")
+        self.root.resizable(False, False)
 
-# Frame for Preference.
-preference_frame = tk.Frame(frame)
-preference_frame.pack(side = "left", padx = 10)
+        # Variable.
+        self.preference_item = []
+        self.images_path = ""
+        self.images = []
+        self.interval_value = 1000
+        self.accuracy_value = 80
 
-preference_label = tk.Label(preference_frame, text = "Preferences", font = ("Aria", 10, "bold"))
-preference_label.pack()
+        # Setup database.
+        self.conn = sqlite3.connect("app.db")
+        self.cursor = self.conn.cursor()
+        self.cursor.execute("CREATE TABLE IF NOT EXISTS preferences (id INTEGER PRIMARY KEY, preference TEXT, interval INTEGER, accuracy INTEGER, images TEXT)")
+        self.conn.commit()
 
-preference_scrollbar = tk.Scrollbar(preference_frame, orient = "vertical")
-preference = tk.Listbox(preference_frame, height = 10, width = 20, yscrollcommand = preference_scrollbar.set)
-preference_scrollbar.config(command = preference.yview)
+        # Setup value.
+        self.cursor.execute("SELECT preference FROM preferences")
+        for preference in self.cursor.fetchall():
+            self.preference_item.append(preference[0])
 
-preference.pack(side = "left")
-preference_scrollbar.pack(side = "left", fill = "y")
+        # Validation command to resrict input.
+        self.vmcd = (self.root.register(self.validated_input_interval), '%P', '%S', '%W')
+        
+        # Parent frame.
+        self.frame = tk.Frame(self.root)
+        self.frame.pack(padx = 10, pady = 10)
 
-# Frame for priority order.
-priority_order_frame = tk.Frame(frame)
-priority_order_frame.pack(side = "left", padx = 10)
+        # Images frame.
+        self.images_frame = tk.Frame(self.frame)
+        self.images_frame.pack(side = "left")
 
-priority_order_label = tk.Label(priority_order_frame, text = "Priority Order", font = ("Aria", 10, "bold"))
-priority_order_label.pack()
+        self.images_scrollbar_vt = tk.Scrollbar(self.images_frame, orient = "vertical")
+        self.images_scrollbar_hz = tk.Scrollbar(self.images_frame, orient = "horizontal")
+        self.images_list = DragDropListBox(self.images_frame, app = self, height = 10, width = 20, xscrollcommand = self.images_scrollbar_hz.set, yscrollcommand = self.images_scrollbar_vt.set)
+        self.images_scrollbar_hz.config(command = self.images_list.xview)
+        self.images_scrollbar_vt.config(command = self.images_list.yview)
 
-priority_order_scrollbar = tk.Scrollbar(priority_order_frame, orient = "vertical")
-priority_order = DragDropListBox(priority_order_frame, height = 10, width = 20, yscrollcommand = priority_order_scrollbar.set)
-priority_order_scrollbar.config(command = priority_order.yview)
+        self.images_scrollbar_hz.pack(side = "bottom", fill = "x")
+        self.images_list.pack(side = "left")
+        self.images_scrollbar_vt.pack(side = "left", fill = "y")
 
-priority_order.pack(side = "left")
-priority_order_scrollbar.pack(side = "left", fill = "y")
+        # Config frame.
+        self.config_frame = tk.Frame(self.frame)
+        self.config_frame.pack(side = "top", padx = (10, 0))
 
-# Separator object.
-separator = ttk.Separator(root, orient = "horizontal")
-separator.pack(fill = "x")
+        # Row 1.
+        self.preference_label = ttk.Label(self.config_frame, text = "Preference:")
+        self.preference_label.grid(row = 1, column = 0, sticky = "w", pady = (0, 10))
 
-# Add items
-for i in range(1, 21):
-    preference.insert(tk.END, f"Item {i}")
-    priority_order.insert(tk.END, f"Value {i}")
+        self.preference = ttk.Combobox(self.config_frame, values = self.preference_item, state = "readonly")
+        self.preference.set("Select")
+        self.preference.grid(row = 1, column = 1, sticky = "nsew", pady = (0, 10))
+        self.preference.bind("<<ComboboxSelected>>", self.upon_preference_selected)
 
-# Root.
-root.mainloop()
+        # Row 2.
+        self.interval_label = ttk.Label(self.config_frame, text = "Interval (ms):")
+        self.interval_label.grid(row = 2, column = 0, sticky = "w", pady = (0, 10))
+
+        self.interval = ttk.Spinbox(self.config_frame, from_ = 0, to = 100000, validate = "key", validatecommand = self.vmcd)
+        self.interval.grid(row = 2, column = 1, sticky = "w", pady = (0, 10))
+        self.interval.set(1000)
+
+        # Row 3.
+        self.accuracy_label = ttk.Label(self.config_frame, text = "Accuracy (%):")
+        self.accuracy_label.grid(row = 3, column = 0, sticky = "w", pady = (0, 10))
+
+        self.accuracy = ttk.Spinbox(self.config_frame, from_ = 1, to = 100, validate = "key", validatecommand = self.vmcd)
+        self.accuracy.grid(row = 3, column = 1, sticky = "w", pady = (0, 10))
+        self.accuracy.set(80)
+
+        # Row 4.
+        self.btn_new_preference = ttk.Button(self.config_frame, text = "New Preference", command = self.add_preference)
+        self.btn_new_preference.grid(row = 4, column = 0, sticky = "nsew", padx = (0, 10), pady = (0, 10))
+
+        self.btn_import_images = ttk.Button(self.config_frame, text = "Import Images", state = "disabled", command = self.import_images)
+        self.btn_import_images.grid(row = 4, column = 1, sticky = "nsew", pady = (0, 10))
+        
+        # Row 5.
+        self.btn_start = ttk.Button(self.config_frame, text = "Start", command = self.upon_start_clicked)
+        self.btn_start.grid(row = 5, column = 0, columnspan = 2, sticky = "nsew", pady = (0, 10))
+
+        # Row 6.
+        self.info = ttk.Label(self.config_frame, text = "\u2139 Drag and drop to reorder items.\n\u2139Press ESC to stop the program.")
+        self.info.grid(row = 6, column = 0, columnspan = 2)
+
+    def validated_input_interval(self, user_input, new_value, widget_name):
+        # Allow empty value or only digits as valid input.
+        if new_value == '' or new_value.isdigit():
+            try:
+                # Get value from the Spinbox.
+                min = int(self.root.nametowidget(widget_name).cget('from'))
+                max = int(self.root.nametowidget(widget_name).cget('to'))
+
+                # Check input range.
+                if user_input and int(user_input) not in range(min, max + 1):
+                    return False
+                return True
+            except ValueError:
+                return False
+        return False
+
+    def add_preference(self):
+        def preference_exists(item):
+            return item in self.preference_item
+        
+        new_preference = simpledialog.askstring("New Preference", "Enter Name:")
+
+        if new_preference:
+            new_preference = new_preference.strip()
+
+            if new_preference:
+                if preference_exists(new_preference):
+                    messagebox.showwarning("Warning", "Preference name already in used.")
+                    return
+                
+                self.preference_item.append(new_preference)
+                self.preference['values'] = self.preference_item
+
+                # Update database.
+                self.cursor.execute("INSERT INTO preferences (preference, interval, accuracy) VALUES (?, ?, ?)", (new_preference, 1000, 80))
+                self.conn.commit()
+                
+            else:
+                messagebox.showwarning("Warning", "Name cannot be empty.")
+    
+    def upon_preference_selected(self, event):
+        if self.preference.get() != "Select":
+            # Enable import image button.
+            self.btn_import_images.config(state = "normal")
+
+            # Read from database.
+            self.cursor.execute("SELECT interval, accuracy, images FROM preferences WHERE preference = ?", (self.preference.get(),))
+            result = self.cursor.fetchone()
+
+            # Clear Listbox and insert the image.
+            self.images_list.delete(0, "end")
+
+            if result:
+                interval, accuracy, images = result
+                self.interval.set(interval)
+                self.accuracy.set(accuracy)
+                
+                for image in json.loads(images):
+                    self.images_list.insert(tk.END, image)
+            
+            self.images_list.xview_moveto(1)
+        else:
+            self.btn_import_images.config(state = "disabled")
+
+    def import_images(self):
+        file_paths = filedialog.askopenfilenames(filetypes = [("Image Files", "*.*")])
+
+        for file in file_paths:
+            # Get the file name.
+            if file in self.images:
+                index = self.images.index(file)
+                del self.images[index]
+
+            self.images.append(file)
+
+        # Clear Listbox and insert the image.
+        self.images_list.delete(0, "end")
+
+        for image in self.images:
+            self.images_list.insert("end", image)
+        
+        self.import_or_reorder()
+
+    def import_or_reorder(self):
+        images = []
+        for index in range(self.images_list.size()):
+            value = self.images_list.get(index)
+            images.append(value)
+
+        self.cursor.execute("UPDATE preferences SET images = ? WHERE preference = ?", (json.dumps(images), self.preference.get()))
+        self.conn.commit()
+
+    def upon_start_clicked(self):
+        self.cursor.execute("UPDATE preferences SET interval = ?, accuracy = ? WHERE preference = ?", (int(self.interval.get()), int(self.accuracy.get()), self.preference.get()))
+        self.conn.commit()
+
+        def auto_click():
+            stop_loop = False
+            self.btn_start.config(state = "disabled")
+
+            while not stop_loop:
+                if keyboard.is_pressed('esc'):
+                    stop_loop = True
+                    self.btn_start.config(state = "normal")
+                    messagebox.showinfo("Info", "Auto-clicker stopeed.")
+
+                for image_path in self.images_list:
+                    self.find_and_click_images(image_path)
+                
+                time.sleep(int(self.interval.get()) / 1000)  # Delay before searching again
+
+        threading.Thread(target = auto_click, daemon = True).start()
+
+    def find_and_click_images(self, image_path):
+        # Disable PyAutoGUI failsafe (Only if needed)
+        pyautogui.FAILSAFE = False
+
+        # Set confidence threshold for image matching
+        CONFIDENCE_THRESHOLD = int(self.accuracy.get()) / 10  # Adjust based on accuracy needed
+
+        # Take a screenshot
+        screen = pyautogui.screenshot()
+        screen = np.array(screen)
+        screen = cv2.cvtColor(screen, cv2.COLOR_RGB2GRAY)  # Convert to grayscale
+
+        # Load the template image
+        template = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+
+        if template is None:
+            messagebox.showwarning(f"Cannot load {image_path}\nPlease check if the image exist.")
+            return
+
+        # Get template size
+        h, w = template.shape[:2]
+
+        # Match template
+        result = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
+        locations = np.where(result >= CONFIDENCE_THRESHOLD)
+
+        clicked_positions = set()  # Prevent clicking the same spot multiple times
+
+        for pt in zip(*locations[::-1]):  # Iterate through matched locations
+            center_x = pt[0] + w // 2
+            center_y = pt[1] + h // 2
+
+            # Avoid duplicate clicks (if images are close together)
+            if any(abs(center_x - x) < 10 and abs(center_y - y) < 10 for x, y in clicked_positions):
+                continue
+
+            clicked_positions.add((center_x, center_y))
+
+            # Move and click
+            pyautogui.moveTo(center_x, center_y, duration=0.02)
+            pyautogui.click()
+            pyautogui.moveTo(0, 0, 0)
+            time.sleep(int(self.interval.get()) / 1000)  # Delay to prevent excessive clicking
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = App(root)
+    root.mainloop()
