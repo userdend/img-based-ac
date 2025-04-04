@@ -5,6 +5,7 @@ import sqlite3
 import json
 
 # For auto-clicker to function.
+import os
 import time
 import pyautogui
 import cv2
@@ -195,8 +196,9 @@ class App:
                 self.interval.set(interval)
                 self.accuracy.set(accuracy)
                 
-                for image in json.loads(images):
-                    self.images_list.insert(tk.END, image)
+                if images:
+                    for image in json.loads(images):
+                        self.images_list.insert(tk.END, image)
             
             self.images_list.xview_moveto(1)
         else:
@@ -206,12 +208,11 @@ class App:
         file_paths = filedialog.askopenfilenames(filetypes = [("Image Files", "*.*")])
 
         for file in file_paths:
-            # Get the file name.
-            if file in self.images:
-                index = self.images.index(file)
-                del self.images[index]
-
-            self.images.append(file)
+            if os.path.isfile(file) and file.endswith(('png', 'jpg', 'jpeg', 'gif')):
+                if file not in self.images:
+                    self.images.append(file)
+            else:
+                messagebox.showwarning("Warning", f"Invalid file: {file}")
 
         # Clear Listbox and insert the image.
         self.images_list.delete(0, "end")
@@ -244,7 +245,7 @@ class App:
                     self.btn_start.config(state = "normal")
                     messagebox.showinfo("Info", "Auto-clicker stopeed.")
 
-                for image_path in self.images_list:
+                for image_path in self.images_list.get(0, tk.END):
                     self.find_and_click_images(image_path)
                 
                 time.sleep(int(self.interval.get()) / 1000)  # Delay before searching again
