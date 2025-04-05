@@ -1,4 +1,4 @@
-/asset
-/build
-/dist
+asset/
+build/
+dist/
 *.db
