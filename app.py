@@ -60,8 +60,8 @@ class App:
         self.preference_item = []
         self.images_path = ""
         self.images = []
-        self.interval_value = 1000
-        self.accuracy_value = 80
+        self.interval_value = tk.StringVar()
+        self.accuracy_value = tk.StringVar()
 
         # Setup database.
         self.conn = sqlite3.connect("app.db")
@@ -112,7 +112,7 @@ class App:
         self.interval_label = ttk.Label(self.config_frame, text = "Interval (ms):")
         self.interval_label.grid(row = 2, column = 0, sticky = "w", pady = (0, 10))
 
-        self.interval = ttk.Spinbox(self.config_frame, from_ = 0, to = 100000, validate = "key", validatecommand = self.vmcd)
+        self.interval = ttk.Spinbox(self.config_frame, from_ = 0, to = 100000, validate = "key", validatecommand = self.vmcd, textvariable = self.interval_value)
         self.interval.grid(row = 2, column = 1, sticky = "w", pady = (0, 10))
         self.interval.set(1000)
 
@@ -120,7 +120,7 @@ class App:
         self.accuracy_label = ttk.Label(self.config_frame, text = "Accuracy (%):")
         self.accuracy_label.grid(row = 3, column = 0, sticky = "w", pady = (0, 10))
 
-        self.accuracy = ttk.Spinbox(self.config_frame, from_ = 1, to = 100, validate = "key", validatecommand = self.vmcd)
+        self.accuracy = ttk.Spinbox(self.config_frame, from_ = 1, to = 100, validate = "key", validatecommand = self.vmcd, textvariable = self.accuracy_value)
         self.accuracy.grid(row = 3, column = 1, sticky = "w", pady = (0, 10))
         self.accuracy.set(80)
 
@@ -232,59 +232,74 @@ class App:
         self.conn.commit()
 
     def upon_start_clicked(self):
-        self.cursor.execute("UPDATE preferences SET interval = ?, accuracy = ? WHERE preference = ?", (int(self.interval.get()), int(self.accuracy.get()), self.preference.get()))
+        self.btn_start.config(state = "disabled")
+    
+        interval_value = int(self.interval_value.get())
+        accuracy_value = int(self.accuracy_value.get())
+
+        self.cursor.execute("UPDATE preferences SET interval = ?, accuracy = ? WHERE preference = ?", (interval_value, accuracy_value, self.preference.get()))
         self.conn.commit()
 
-        def auto_click():
-            stop_loop = False
-            self.btn_start.config(state = "disabled")
+        interval_value = interval_value / 1000
+        accuracy_value = accuracy_value / 100
 
-            while not stop_loop:
-                if keyboard.is_pressed('esc'):
-                    stop_loop = True
-                    self.btn_start.config(state = "normal")
-                    messagebox.showinfo("Info", "Auto-clicker stopeed.")
+        self.stop_loop = False
 
-                for image_path in self.images_list.get(0, tk.END):
-                    self.find_and_click_images(image_path)
-                
-                time.sleep(int(self.interval.get()) / 1000)  # Delay before searching again
+        # Start a separate thread for detecting ESC key press
+        threading.Thread(target = self.monitor_esc_program, daemon = True).start()
 
-        threading.Thread(target = auto_click, daemon = True).start()
+        # Start auto-clicker on another thread.
+        threading.Thread(target = self.start_auto_click, args = (interval_value, accuracy_value), daemon = True).start()
+    
+    def monitor_esc_program(self):
+        while not self.stop_loop:
+            if keyboard.is_pressed('esc'):
+                self.stop_loop = True
+                self.update_ui_on_stop()
+                return
+            
+            time.sleep(0.1)
 
-    def find_and_click_images(self, image_path):
-        # Disable PyAutoGUI failsafe (Only if needed)
+    def start_auto_click(self, iv, av):
+        while not self.stop_loop:
+            for image_path in self.images_list.get(0, tk.END):
+                self.find_and_click_images(image_path, iv, av)
+            
+            time.sleep(iv)  # Delay before searching again.
+
+    def find_and_click_images(self, image_path, iv, av):
+        # Disable PyAutoGUI failsafe (Only if needed).
         pyautogui.FAILSAFE = False
 
-        # Set confidence threshold for image matching
-        CONFIDENCE_THRESHOLD = int(self.accuracy.get()) / 10  # Adjust based on accuracy needed
+        # Set confidence threshold for image matching.
+        CONFIDENCE_THRESHOLD = av  # Adjust based on accuracy needed.
 
         # Take a screenshot
         screen = pyautogui.screenshot()
         screen = np.array(screen)
-        screen = cv2.cvtColor(screen, cv2.COLOR_RGB2GRAY)  # Convert to grayscale
+        screen = cv2.cvtColor(screen, cv2.COLOR_RGB2GRAY)  # Convert to grayscale.
 
-        # Load the template image
+        # Load the template image.
         template = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
 
         if template is None:
-            messagebox.showwarning(f"Cannot load {image_path}\nPlease check if the image exist.")
+            print(f"[ERROR] Cannot load template: {image_path}")
             return
 
-        # Get template size
+        # Get template size.
         h, w = template.shape[:2]
 
-        # Match template
+        # Match template.
         result = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
         locations = np.where(result >= CONFIDENCE_THRESHOLD)
 
-        clicked_positions = set()  # Prevent clicking the same spot multiple times
+        clicked_positions = set()  # Prevent clicking the same spot multiple times.
 
-        for pt in zip(*locations[::-1]):  # Iterate through matched locations
+        for pt in zip(*locations[::-1]):  # Iterate through matched locations.
             center_x = pt[0] + w // 2
             center_y = pt[1] + h // 2
 
-            # Avoid duplicate clicks (if images are close together)
+            # Avoid duplicate clicks (if images are close together).
             if any(abs(center_x - x) < 10 and abs(center_y - y) < 10 for x, y in clicked_positions):
                 continue
 
@@ -294,8 +309,11 @@ class App:
             pyautogui.moveTo(center_x, center_y, duration=0.02)
             pyautogui.click()
             pyautogui.moveTo(0, 0, 0)
-            time.sleep(int(self.interval.get()) / 1000)  # Delay to prevent excessive clicking
+            time.sleep(iv)  # Delay to prevent excessive clicking.
 
+    def update_ui_on_stop(self):
+        self.root.after(0, lambda: self.btn_start.config(state = "normal"))
+        self.root.after(0, lambda: messagebox.showinfo("Info", "Auto-clicker stopped."))
 
 if __name__ == "__main__":
     root = tk.Tk()
