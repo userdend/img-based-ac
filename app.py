@@ -208,7 +208,7 @@ class App:
         file_paths = filedialog.askopenfilenames(filetypes = [("Image Files", "*.*")])
 
         for file in file_paths:
-            if os.path.isfile(file) and file.endswith(('png', 'jpg', 'jpeg', 'gif')):
+            if os.path.isfile(file) and file.endswith(('png', 'jpg', 'jpeg', 'gif', 'PNG', 'JPG', 'JPEG', 'GIF')):
                 if file not in self.images:
                     self.images.append(file)
             else:
