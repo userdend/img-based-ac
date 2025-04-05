@@ -55,7 +55,6 @@ class App:
         self.root = root
         self.root.title("Image-Based Auto Clicker")
         self.root.resizable(False, False)
-        self.root.iconbitmap('icon.ico')
 
         # Variable.
         self.preference_item = []
